@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,8 @@ import {
   SafeAreaView,
   ActivityIndicator,
   ScrollView,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Sharing from 'expo-sharing';
@@ -24,12 +26,16 @@ import { useFocusEffect } from 'expo-router';
 const STORAGE_KEY = 'travelJournal';
 
 export default function GalleryScreen() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   const { width } = useWindowDimensions();
   const numColumns = width > 600 ? 3 : 2;
   const itemWidth = (width - 32 - (numColumns - 1) * 12) / numColumns;
 
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all'); // 'all' | 'favorites'
 
@@ -54,10 +60,14 @@ export default function GalleryScreen() {
       const storedJournal = await AsyncStorage.getItem(STORAGE_KEY);
       if (storedJournal) {
         const parsed = JSON.parse(storedJournal);
-        // Ensure each item has a unique id and title/isFavorite fields
         const formatted = parsed.map((item, index) => ({
           id: item.id || item.timestamp?.toString() || index.toString(),
-          title: item.title || item.name || (item.address?.city ? `Photo at ${item.address.city}` : `Travel Photo #${index + 1}`),
+          title:
+            item.title ||
+            item.name ||
+            (item.address?.city
+              ? `Photo at ${item.address.city}`
+              : `Travel Photo #${index + 1}`),
           isFavorite: item.isFavorite || false,
           ...item,
         }));
@@ -65,19 +75,23 @@ export default function GalleryScreen() {
       } else {
         setPhotos([]);
       }
-    } catch (error) {
-      console.error('Error loading gallery photos:', error);
+    } catch (_error) {
       setErrorMessage('Failed to load gallery photos from storage.');
     } finally {
       setLoading(false);
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadPhotos();
+    setTimeout(() => setRefreshing(false), 500);
+  };
+
   const savePhotosToStorage = async (updatedPhotos) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedPhotos));
-    } catch (error) {
-      console.error('Error saving updated photos:', error);
+    } catch (_error) {
       Alert.alert('Save Error', 'Could not persist changes to storage.');
     }
   };
@@ -93,13 +107,12 @@ export default function GalleryScreen() {
       });
       setPhotos(updated);
 
-      // If currently selected in preview modal, update it too
       if (selectedPhoto && selectedPhoto.id === photoId) {
         setSelectedPhoto((prev) => ({ ...prev, isFavorite: !prev.isFavorite }));
       }
 
       await savePhotosToStorage(updated);
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Error', 'Failed to update favorite status.');
     }
   };
@@ -137,7 +150,7 @@ export default function GalleryScreen() {
       setRenameModalVisible(false);
       setEditingPhoto(null);
       setNewTitle('');
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Error', 'Failed to rename photo.');
     }
   };
@@ -167,18 +180,20 @@ export default function GalleryScreen() {
       if (selectedPhoto && selectedPhoto.id === photoId) {
         setSelectedPhoto(null);
       }
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Error', 'Failed to delete photo.');
     }
   };
 
-  // Share Photo Location & Info
+  // Share Photo
   const handleShare = async (photo) => {
     try {
       const lat = photo.latitude;
       const lon = photo.longitude;
       const mapUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
-      const message = `Check out my photo "${photo.title}" taken at ${photo.address?.city || 'Travel Location'}!\n\nLocation: ${mapUrl}`;
+      const message = `Check out my photo "${photo.title}" taken at ${
+        photo.address?.city || 'Travel Location'
+      }!\n\nLocation: ${mapUrl}`;
 
       if (photo.uri && (await Sharing.isAvailableAsync())) {
         await Sharing.shareAsync(photo.uri, {
@@ -218,7 +233,7 @@ export default function GalleryScreen() {
 
   const renderPhotoCard = ({ item }) => (
     <TouchableOpacity
-      style={[styles.card, { width: itemWidth }]}
+      style={[styles.card, isDark && styles.cardDark, { width: itemWidth }]}
       activeOpacity={0.8}
       onPress={() => setSelectedPhoto(item)}
     >
@@ -237,7 +252,7 @@ export default function GalleryScreen() {
       </TouchableOpacity>
 
       <View style={styles.cardContent}>
-        <Text style={styles.cardTitle} numberOfLines={1}>
+        <Text style={[styles.cardTitle, isDark && styles.textDark]} numberOfLines={1}>
           {item.title}
         </Text>
         {item.address?.city ? (
@@ -254,12 +269,12 @@ export default function GalleryScreen() {
         </Text>
 
         {/* Quick Action Bar */}
-        <View style={styles.cardActions}>
+        <View style={[styles.cardActions, isDark && styles.borderDark]}>
           <TouchableOpacity
             style={styles.actionBtn}
             onPress={() => openRenameModal(item)}
           >
-            <Ionicons name="pencil" size={16} color="#4A5568" />
+            <Ionicons name="pencil" size={16} color={isDark ? '#A0AEC0' : '#4A5568'} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionBtn}
@@ -273,20 +288,20 @@ export default function GalleryScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Travel Gallery</Text>
-        <Text style={styles.headerSubtitle}>
-          {photos.length} {photos.length === 1 ? 'photo' : 'photos'} saved
+        <Text style={[styles.headerTitle, isDark && styles.textDark]}>Travel Gallery</Text>
+        <Text style={[styles.headerSubtitle, isDark && styles.textSubDark]}>
+          {photos.length} {photos.length === 1 ? 'photo' : 'photos'} saved | Offline Cache Enabled
         </Text>
       </View>
 
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
+      <View style={[styles.searchContainer, isDark && styles.searchDark]}>
         <Ionicons name="search" size={20} color="#8E8E93" style={styles.searchIcon} />
         <TextInput
-          style={styles.searchInput}
+          style={[styles.searchInput, isDark && styles.textDark]}
           placeholder="Search by title, city, region..."
           placeholderTextColor="#8E8E93"
           value={searchQuery}
@@ -304,6 +319,7 @@ export default function GalleryScreen() {
         <TouchableOpacity
           style={[
             styles.filterTab,
+            isDark && styles.filterTabDark,
             activeFilter === 'all' && styles.filterTabActive,
           ]}
           onPress={() => setActiveFilter('all')}
@@ -311,11 +327,12 @@ export default function GalleryScreen() {
           <Ionicons
             name="images-outline"
             size={16}
-            color={activeFilter === 'all' ? '#FFFFFF' : '#4A5568'}
+            color={activeFilter === 'all' ? '#FFFFFF' : isDark ? '#CBD5E0' : '#4A5568'}
           />
           <Text
             style={[
               styles.filterText,
+              isDark && styles.filterTextDark,
               activeFilter === 'all' && styles.filterTextActive,
             ]}
           >
@@ -326,6 +343,7 @@ export default function GalleryScreen() {
         <TouchableOpacity
           style={[
             styles.filterTab,
+            isDark && styles.filterTabDark,
             activeFilter === 'favorites' && styles.filterTabActive,
           ]}
           onPress={() => setActiveFilter('favorites')}
@@ -338,6 +356,7 @@ export default function GalleryScreen() {
           <Text
             style={[
               styles.filterText,
+              isDark && styles.filterTextDark,
               activeFilter === 'favorites' && styles.filterTextActive,
             ]}
           >
@@ -346,7 +365,7 @@ export default function GalleryScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Error Message Banner */}
+      {/* Error Banner */}
       {errorMessage ? (
         <View style={styles.errorBanner}>
           <Ionicons name="alert-circle" size={20} color="#E63946" />
@@ -354,39 +373,47 @@ export default function GalleryScreen() {
         </View>
       ) : null}
 
-      {/* Photos List / Grid */}
+      {/* Photos Grid */}
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color="#4A90E2" />
-          <Text style={styles.loadingText}>Loading gallery...</Text>
+          <Text style={[styles.loadingText, isDark && styles.textSubDark]}>Loading gallery...</Text>
         </View>
       ) : filteredPhotos.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+          }
+        >
           <Ionicons
             name={activeFilter === 'favorites' ? 'heart-dislike-outline' : 'camera-outline'}
             size={64}
             color="#CBD5E0"
           />
-          <Text style={styles.emptyTitle}>
+          <Text style={[styles.emptyTitle, isDark && styles.textDark]}>
             {activeFilter === 'favorites'
               ? 'No Favorite Photos Yet'
               : 'No Photos Captured'}
           </Text>
-          <Text style={styles.emptySubtitle}>
+          <Text style={[styles.emptySubtitle, isDark && styles.textSubDark]}>
             {activeFilter === 'favorites'
               ? 'Tap the heart icon on any photo to add it to your favorites.'
               : 'Capture photos from the Travel Journal or Camera screen.'}
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={filteredPhotos}
           keyExtractor={(item) => item.id}
           renderItem={renderPhotoCard}
           numColumns={numColumns}
-          key={numColumns} // Re-render when layout orientation/columns change
+          key={numColumns}
           contentContainerStyle={styles.gridContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+          }
         />
       )}
 
@@ -399,7 +426,6 @@ export default function GalleryScreen() {
           onRequestClose={() => setSelectedPhoto(null)}
         >
           <SafeAreaView style={styles.modalContainer}>
-            {/* Modal Header */}
             <View style={styles.modalHeader}>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
@@ -422,14 +448,12 @@ export default function GalleryScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalScroll}>
-              {/* Large Image Preview */}
               <Image
                 source={{ uri: selectedPhoto.uri }}
                 style={styles.modalImage}
                 resizeMode="cover"
               />
 
-              {/* Photo Details Card */}
               <View style={styles.detailsCard}>
                 <View style={styles.detailsRow}>
                   <Ionicons name="time-outline" size={18} color="#4A90E2" />
@@ -467,7 +491,6 @@ export default function GalleryScreen() {
                 ) : null}
               </View>
 
-              {/* Action Toolbar */}
               <View style={styles.modalToolbar}>
                 <TouchableOpacity
                   style={styles.toolBtn}
@@ -506,7 +529,7 @@ export default function GalleryScreen() {
         </Modal>
       )}
 
-      {/* Rename Photo Modal */}
+      {/* Rename Modal */}
       <Modal
         visible={renameModalVisible}
         transparent={true}
@@ -514,13 +537,14 @@ export default function GalleryScreen() {
         onRequestClose={() => setRenameModalVisible(false)}
       >
         <View style={styles.dialogBackdrop}>
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Rename Photo</Text>
+          <View style={[styles.dialogCard, isDark && styles.cardDark]}>
+            <Text style={[styles.dialogTitle, isDark && styles.textDark]}>Rename Photo</Text>
             <TextInput
-              style={styles.dialogInput}
+              style={[styles.dialogInput, isDark && styles.dialogInputDark]}
               value={newTitle}
               onChangeText={setNewTitle}
               placeholder="Enter new photo title"
+              placeholderTextColor="#A0AEC0"
               autoFocus
             />
             <View style={styles.dialogButtons}>
@@ -550,6 +574,21 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8F9FA',
   },
+  containerDark: {
+    backgroundColor: '#0F172A',
+  },
+  textDark: {
+    color: '#FFFFFF',
+  },
+  textSubDark: {
+    color: '#94A3B8',
+  },
+  cardDark: {
+    backgroundColor: '#1E293B',
+  },
+  borderDark: {
+    borderTopColor: '#334155',
+  },
   header: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -575,6 +614,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 44,
   },
+  searchDark: {
+    backgroundColor: '#1E293B',
+  },
   searchIcon: {
     marginRight: 8,
   },
@@ -598,6 +640,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     gap: 6,
   },
+  filterTabDark: {
+    backgroundColor: '#1E293B',
+  },
   filterTabActive: {
     backgroundColor: '#4A90E2',
   },
@@ -605,6 +650,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#4A5568',
+  },
+  filterTextDark: {
+    color: '#CBD5E0',
   },
   filterTextActive: {
     color: '#FFFFFF',
@@ -701,7 +749,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   emptyContainer: {
-    flex: 1,
+    flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
@@ -821,6 +869,10 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#2D3748',
     marginBottom: 18,
+  },
+  dialogInputDark: {
+    backgroundColor: '#334155',
+    color: '#FFFFFF',
   },
   dialogButtons: {
     flexDirection: 'row',

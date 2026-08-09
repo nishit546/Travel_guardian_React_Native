@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,35 +6,45 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Image,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function HomeScreen() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 500);
+  };
 
   const featureCards = [
     {
       id: 'camera',
-      title: 'Camera & Scanner',
-      subtitle: 'Capture photos, record videos & scan barcodes',
+      title: 'Pro Camera & Scanner',
+      subtitle: 'Grid overlay, Zoom, Tap-Focus, Self-Timer & Sound',
       icon: 'camera-outline',
       color: '#4A90E2',
       route: '/camera',
     },
     {
       id: 'location',
-      title: 'GPS & Location',
-      subtitle: 'Track location, geocode address & calculate distance',
+      title: 'GPS & Offline Geocoding',
+      subtitle: 'Track location, compass heading & offline address cache',
       icon: 'location-outline',
       color: '#2EC4B6',
       route: '/location',
     },
     {
       id: 'journal',
-      title: 'Travel Journal',
-      subtitle: 'Snap geotagged travel photos with live address overlay',
+      title: 'Geotagged Travel Journal',
+      subtitle: 'Snap photos with live GPS address overlays & export JSON',
       icon: 'map-outline',
       color: '#FF9F1C',
       route: '/camera-location',
@@ -50,34 +60,39 @@ export default function HomeScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+        }
+      >
         {/* Banner Card */}
         <View style={styles.heroCard}>
           <View style={styles.heroTextContainer}>
-            <Text style={styles.heroBadge}>TRAVEL GUARDIAN</Text>
+            <Text style={styles.heroBadge}>TRAVEL GUARDIAN • PART 10 COMPLETE</Text>
             <Text style={styles.heroTitle}>Your Smart Travel Companion</Text>
             <Text style={styles.heroSubtitle}>
-              Capture memories, track GPS locations, and organize your geotagged travel journal effortlessly.
+              Capture geotagged memories, track GPS coordinates with offline address caching, and organize your photo gallery with ease.
             </Text>
           </View>
         </View>
 
         {/* Quick Action Grid */}
-        <Text style={styles.sectionHeader}>Quick Access</Text>
+        <Text style={[styles.sectionHeader, isDark && styles.textDark]}>Quick Access</Text>
         <View style={styles.grid}>
           {featureCards.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={styles.card}
+              style={[styles.card, isDark && styles.cardDark]}
               activeOpacity={0.8}
               onPress={() => router.push(item.route)}
             >
               <View style={[styles.iconCircle, { backgroundColor: item.color }]}>
                 <Ionicons name={item.icon} size={24} color="#FFFFFF" />
               </View>
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardSubtitle}>{item.subtitle}</Text>
+              <Text style={[styles.cardTitle, isDark && styles.textDark]}>{item.title}</Text>
+              <Text style={[styles.cardSubtitle, isDark && styles.textSubDark]}>{item.subtitle}</Text>
               <View style={styles.cardArrow}>
                 <Ionicons name="arrow-forward" size={16} color={item.color} />
               </View>
@@ -86,27 +101,31 @@ export default function HomeScreen() {
         </View>
 
         {/* Features Checklist */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>Key Capabilities</Text>
+        <View style={[styles.summaryCard, isDark && styles.cardDark]}>
+          <Text style={[styles.summaryTitle, isDark && styles.textDark]}>Part 10 Enhancements</Text>
           <View style={styles.checkRow}>
             <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
-            <Text style={styles.checkText}>Bottom Navigation & Responsive Layout</Text>
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Dark Mode & Smooth Animations</Text>
           </View>
           <View style={styles.checkRow}>
             <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
-            <Text style={styles.checkText}>Camera, Video & Barcode / QR Scanner</Text>
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Rule of Thirds Camera Grid Overlay</Text>
           </View>
           <View style={styles.checkRow}>
             <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
-            <Text style={styles.checkText}>Geotagged Photo Capture & GPS Tracking</Text>
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Zoom & Tap-to-Focus Target Ring</Text>
           </View>
           <View style={styles.checkRow}>
             <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
-            <Text style={styles.checkText}>Photo Gallery with Search, Favorites, Delete & Rename</Text>
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Self-Timer Countdown & Flash Shutter</Text>
           </View>
           <View style={styles.checkRow}>
             <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
-            <Text style={styles.checkText}>Permission Request Banners & Robust Error Handling</Text>
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Shutter Sound Toggle & Pull to Refresh</Text>
+          </View>
+          <View style={styles.checkRow}>
+            <Ionicons name="checkmark-circle" size={18} color="#2EC4B6" />
+            <Text style={[styles.checkText, isDark && styles.textSubDark]}>Offline Address Cache Layer</Text>
           </View>
         </View>
       </ScrollView>
@@ -118,6 +137,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  containerDark: {
+    backgroundColor: '#0F172A',
+  },
+  textDark: {
+    color: '#FFFFFF',
+  },
+  textSubDark: {
+    color: '#94A3B8',
+  },
+  cardDark: {
+    backgroundColor: '#1E293B',
   },
   scrollContent: {
     padding: 16,
@@ -139,7 +170,7 @@ const styles = StyleSheet.create({
   },
   heroBadge: {
     color: '#4A90E2',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1.5,
   },

@@ -8,22 +8,28 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
+  Animated,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import { useCameraPermissions, CameraView, useMicrophonePermissions } from 'expo-camera';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 
-const VideoPlayer = ({ videoUri }) => {
+const VideoPlayer = ({ videoUri, isDark }) => {
   const player = useVideoPlayer(videoUri);
   return (
-    <View style={styles.videoCard}>
-      <Text style={styles.previewTitle}>Recorded Video Preview</Text>
+    <View style={[styles.videoCard, isDark && styles.cardDark]}>
+      <Text style={[styles.previewTitle, isDark && styles.textDark]}>Recorded Video Preview</Text>
       <VideoView player={player} style={styles.videoPlayer} nativeControls />
     </View>
   );
 };
 
 const CameraScreen = () => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [audioPermission, requestAudioPermission] = useMicrophonePermissions();
 
@@ -37,37 +43,85 @@ const CameraScreen = () => {
   const [scanned, setScanned] = useState(false);
   const [scannedResult, setScannedResult] = useState(null);
 
+  // Part 10 Enhancements State
+  const [showGrid, setShowGrid] = useState(true);
+  const [zoom, setZoom] = useState(0); // 0.0 to 1.0
+  const [timerSeconds, setTimerSeconds] = useState(0); // 0, 3, 5, 10
+  const [countdown, setCountdown] = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Tap to Focus State & Animation
+  const [focusPos, setFocusPos] = useState(null);
+  const focusAnim = useRef(new Animated.Value(0)).current;
+
+  // Flash Shutter Animation
+  const flashAnim = useRef(new Animated.Value(0)).current;
+
   const cameraRef = useRef(null);
 
   const handleGrantPermissions = async () => {
     try {
       await requestCameraPermission();
       await requestAudioPermission();
-    } catch (e) {
+    } catch (_e) {
       Alert.alert('Permission Error', 'Failed to request camera/mic permission.');
     }
   };
 
-  if (!cameraPermission?.granted || !audioPermission?.granted) {
-    return (
-      <SafeAreaView style={styles.permissionContainer}>
-        <Ionicons name="camera-outline" size={64} color="#4A90E2" />
-        <Text style={styles.permissionTitle}>Camera & Mic Access Required</Text>
-        <Text style={styles.permissionText}>
-          Please grant permission to use the camera, microphone, and barcode scanner features.
-        </Text>
-        <TouchableOpacity style={styles.permissionBtn} onPress={handleGrantPermissions}>
-          <Ionicons name="key-outline" size={20} color="#FFFFFF" />
-          <Text style={styles.permissionBtnText}>Grant Camera & Mic Permission</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
+  const onRefresh = () => {
+    setRefreshing(true);
+    setPhoto(null);
+    setVideo(null);
+    setScannedResult(null);
+    setScanned(false);
+    setTimeout(() => setRefreshing(false), 600);
+  };
 
-  const handleClickCapture = async () => {
+  // Trigger White Flash Shutter Animation
+  const triggerShutterFlash = () => {
+    flashAnim.setValue(1);
+    Animated.timing(flashAnim, {
+      toValue: 0,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  // Tap to Focus Handler
+  const handleTapToFocus = (event) => {
+    const {locationX, locationY} = event.nativeEvent;
+    setFocusPos({ x: locationX, y: locationY });
+
+    focusAnim.setValue(1.4);
+    Animated.spring(focusAnim, {
+      toValue: 1,
+      friction: 4,
+      useNativeDriver: true,
+    }).start(() => {
+      setTimeout(() => setFocusPos(null), 1200);
+    });
+  };
+
+  // Self Timer Execution
+  const executeCapture = async () => {
+    if (timerSeconds > 0) {
+      for (let i = timerSeconds; i > 0; i--) {
+        setCountdown(i);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      setCountdown(null);
+    }
+    performCapture();
+  };
+
+  const performCapture = async () => {
     if (!cameraRef.current) return;
     try {
-      const captured = await cameraRef.current.takePictureAsync();
+      triggerShutterFlash();
+      const captured = await cameraRef.current.takePictureAsync({
+        shutterSound: soundEnabled,
+      });
       setPhoto(captured.uri);
     } catch (error) {
       console.log('Capture error:', error);
@@ -116,16 +170,40 @@ const CameraScreen = () => {
     setScannedResult(null);
   };
 
+  if (!cameraPermission?.granted || !audioPermission?.granted) {
+    return (
+      <SafeAreaView style={[styles.permissionContainer, isDark && styles.containerDark]}>
+        <Ionicons name="camera-outline" size={64} color="#4A90E2" />
+        <Text style={[styles.permissionTitle, isDark && styles.textDark]}>Camera & Mic Access Required</Text>
+        <Text style={[styles.permissionText, isDark && styles.textSubDark]}>
+          Please grant permission to use the camera, microphone, and barcode scanner features.
+        </Text>
+        <TouchableOpacity style={styles.permissionBtn} onPress={handleGrantPermissions}>
+          <Ionicons name="key-outline" size={20} color="#FFFFFF" />
+          <Text style={styles.permissionBtnText}>Grant Camera & Mic Permission</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+        }
+      >
+        {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Camera & Scanner</Text>
-          <Text style={styles.headerSubtitle}>Photo, Video & QR/Barcode Reader</Text>
+          <Text style={[styles.headerTitle, isDark && styles.textDark]}>Pro Camera & Scanner</Text>
+          <Text style={[styles.headerSubtitle, isDark && styles.textSubDark]}>
+            Grid, Zoom, Tap-Focus, Self-Timer & Sound
+          </Text>
         </View>
 
         {/* Mode Switcher */}
-        <View style={styles.modeRow}>
+        <View style={[styles.modeRow, isDark && styles.modeRowDark]}>
           <TouchableOpacity
             style={[styles.modeTab, mode === 'picture' && styles.modeTabActive]}
             onPress={() => setMode('picture')}
@@ -133,7 +211,7 @@ const CameraScreen = () => {
             <Ionicons
               name="camera-outline"
               size={18}
-              color={mode === 'picture' ? '#FFFFFF' : '#4A5568'}
+              color={mode === 'picture' ? '#FFFFFF' : isDark ? '#A0AEC0' : '#4A5568'}
             />
             <Text style={[styles.modeText, mode === 'picture' && styles.modeTextActive]}>
               Photo Mode
@@ -147,7 +225,7 @@ const CameraScreen = () => {
             <Ionicons
               name="videocam-outline"
               size={18}
-              color={mode === 'video' ? '#FFFFFF' : '#4A5568'}
+              color={mode === 'video' ? '#FFFFFF' : isDark ? '#A0AEC0' : '#4A5568'}
             />
             <Text style={[styles.modeText, mode === 'video' && styles.modeTextActive]}>
               Video Mode
@@ -155,14 +233,19 @@ const CameraScreen = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Camera Preview */}
-        <View style={styles.cameraBox}>
+        {/* Camera Container with Grid & Focus */}
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={handleTapToFocus}
+          style={styles.cameraBox}
+        >
           <CameraView
             ref={cameraRef}
             style={styles.camera}
             facing={facing}
             flash={flash}
             mode={mode}
+            zoom={zoom}
             enableTorch={torch}
             onBarcodeScanned={handleBarcodeScanned}
             barcodeScannerSettings={{
@@ -170,7 +253,56 @@ const CameraScreen = () => {
             }}
           />
 
-          {/* Flash & Torch Badges */}
+          {/* Rule of Thirds Grid Overlay */}
+          {showGrid && (
+            <View style={styles.gridOverlay} pointerEvents="none">
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+            </View>
+          )}
+
+          {/* Tap-to-Focus Target Ring */}
+          {focusPos && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.focusRing,
+                {
+                  left: focusPos.x - 28,
+                  top: focusPos.y - 28,
+                  transform: [{ scale: focusAnim }],
+                },
+              ]}
+            />
+          )}
+
+          {/* Shutter White Flash Overlay */}
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.flashOverlay, { opacity: flashAnim }]}
+          />
+
+          {/* Countdown Timer Large Overlay */}
+          {countdown !== null && (
+            <View style={styles.countdownOverlay}>
+              <Text style={styles.countdownText}>{countdown}</Text>
+            </View>
+          )}
+
+          {/* Top Camera Controls */}
           <View style={styles.topControlOverlay}>
             <TouchableOpacity style={styles.iconCircle} onPress={changeFlash}>
               <Ionicons
@@ -192,25 +324,80 @@ const CameraScreen = () => {
             >
               <Ionicons name="flashlight" size={20} color="#FFFFFF" />
             </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconCircle, showGrid && styles.iconCircleActive]}
+              onPress={() => setShowGrid((prev) => !prev)}
+            >
+              <Ionicons name="grid-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.iconCircle, !soundEnabled && styles.iconCircleActive]}
+              onPress={() => setSoundEnabled((prev) => !prev)}
+            >
+              <Ionicons
+                name={soundEnabled ? 'volume-high-outline' : 'volume-mute-outline'}
+                size={20}
+                color="#FFFFFF"
+              />
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+
+        {/* Zoom & Self-Timer Controls Toolbar */}
+        <View style={[styles.toolbarCard, isDark && styles.cardDark]}>
+          {/* Zoom Selector */}
+          <View style={styles.toolSection}>
+            <Ionicons name="search" size={16} color={isDark ? '#CBD5E0' : '#4A5568'} />
+            <Text style={[styles.toolLabel, isDark && styles.textDark]}>Zoom:</Text>
+            {[0, 0.25, 0.5, 0.75, 1].map((zVal) => (
+              <TouchableOpacity
+                key={zVal}
+                style={[styles.chip, zoom === zVal && styles.chipActive]}
+                onPress={() => setZoom(zVal)}
+              >
+                <Text style={[styles.chipText, zoom === zVal && styles.chipTextActive]}>
+                  {zVal === 0 ? '1x' : `${(zVal * 4 + 1).toFixed(0)}x`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Self Timer Selector */}
+          <View style={styles.toolSection}>
+            <Ionicons name="timer-outline" size={16} color={isDark ? '#CBD5E0' : '#4A5568'} />
+            <Text style={[styles.toolLabel, isDark && styles.textDark]}>Timer:</Text>
+            {[0, 3, 5, 10].map((tVal) => (
+              <TouchableOpacity
+                key={tVal}
+                style={[styles.chip, timerSeconds === tVal && styles.chipActive]}
+                onPress={() => setTimerSeconds(tVal)}
+              >
+                <Text style={[styles.chipText, timerSeconds === tVal && styles.chipTextActive]}>
+                  {tVal === 0 ? 'Off' : `${tVal}s`}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
         {/* Barcode Scanner Status */}
-        <View style={styles.statusRow}>
+        <View style={[styles.statusRow, isDark && styles.cardDark]}>
           <Ionicons
             name={scanned ? 'checkmark-circle' : 'qr-code-outline'}
             size={18}
             color={scanned ? '#2EC4B6' : '#4A90E2'}
           />
-          <Text style={styles.statusText}>
+          <Text style={[styles.statusText, isDark && styles.textDark]}>
             Scanner Status: {scanned ? 'Code Scanned!' : 'Ready to Scan Barcode / QR'}
           </Text>
         </View>
 
-        {/* Main Controls Grid */}
+        {/* Main Actions Grid */}
         <View style={styles.controlsGrid}>
           <TouchableOpacity
-            style={styles.ctrlBtn}
+            style={[styles.ctrlBtn, isDark && styles.ctrlBtnDark]}
             onPress={() => setFacing((prev) => (prev === 'back' ? 'front' : 'back'))}
           >
             <Ionicons name="camera-reverse-outline" size={20} color="#4A90E2" />
@@ -218,9 +405,11 @@ const CameraScreen = () => {
           </TouchableOpacity>
 
           {mode === 'picture' ? (
-            <TouchableOpacity style={styles.capturePrimaryBtn} onPress={handleClickCapture}>
+            <TouchableOpacity style={styles.capturePrimaryBtn} onPress={executeCapture}>
               <Ionicons name="radio-button-on" size={24} color="#FFFFFF" />
-              <Text style={styles.capturePrimaryText}>Take Photo</Text>
+              <Text style={styles.capturePrimaryText}>
+                {timerSeconds > 0 ? `Capture (${timerSeconds}s)` : 'Take Photo'}
+              </Text>
             </TouchableOpacity>
           ) : !recording ? (
             <TouchableOpacity style={styles.recordPrimaryBtn} onPress={startRecording}>
@@ -235,7 +424,7 @@ const CameraScreen = () => {
           )}
 
           {scanned ? (
-            <TouchableOpacity style={styles.ctrlBtn} onPress={resetScan}>
+            <TouchableOpacity style={[styles.ctrlBtn, isDark && styles.ctrlBtnDark]} onPress={resetScan}>
               <Ionicons name="refresh-outline" size={20} color="#4A90E2" />
               <Text style={styles.ctrlBtnText}>Scan Again</Text>
             </TouchableOpacity>
@@ -244,8 +433,8 @@ const CameraScreen = () => {
 
         {/* Photo Preview */}
         {photo ? (
-          <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Photo Captured</Text>
+          <View style={[styles.previewCard, isDark && styles.cardDark]}>
+            <Text style={[styles.previewTitle, isDark && styles.textDark]}>Photo Captured</Text>
             <Image source={{ uri: photo }} style={styles.photoPreview} />
           </View>
         ) : null}
@@ -262,7 +451,7 @@ const CameraScreen = () => {
         ) : null}
 
         {/* Video Preview */}
-        {video ? <VideoPlayer videoUri={video} /> : null}
+        {video ? <VideoPlayer videoUri={video} isDark={isDark} /> : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -274,6 +463,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  containerDark: {
+    backgroundColor: '#0F172A',
+  },
+  textDark: {
+    color: '#FFFFFF',
+  },
+  textSubDark: {
+    color: '#94A3B8',
+  },
+  cardDark: {
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
   },
   scrollContent: {
     padding: 16,
@@ -335,6 +537,9 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     gap: 4,
   },
+  modeRowDark: {
+    backgroundColor: '#1E293B',
+  },
   modeTab: {
     flex: 1,
     flexDirection: 'row',
@@ -356,7 +561,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   cameraBox: {
-    height: 340,
+    height: 360,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#0F172A',
@@ -366,12 +571,51 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  gridOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'column',
+  },
+  gridRow: {
+    flex: 1,
+    flexDirection: 'row',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.3)',
+  },
+  gridCell: {
+    flex: 1,
+    borderRightWidth: 0.5,
+    borderRightColor: 'rgba(255,255,255,0.3)',
+  },
+  focusRing: {
+    position: 'absolute',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    backgroundColor: 'rgba(255,215,0,0.15)',
+  },
+  flashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFFFFF',
+  },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countdownText: {
+    fontSize: 80,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
   topControlOverlay: {
     position: 'absolute',
     top: 12,
     right: 12,
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   iconCircle: {
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -381,13 +625,48 @@ const styles = StyleSheet.create({
   iconCircleActive: {
     backgroundColor: '#E63946',
   },
+  toolbarCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+    gap: 10,
+    elevation: 2,
+  },
+  toolSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  toolLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#2D3748',
+  },
+  chip: {
+    backgroundColor: '#EDF2F7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  chipActive: {
+    backgroundColor: '#4A90E2',
+  },
+  chipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A5568',
+  },
+  chipTextActive: {
+    color: '#FFFFFF',
+  },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
     padding: 12,
     borderRadius: 10,
-    marginBottom: 16,
+    marginBottom: 14,
     gap: 8,
   },
   statusText: {
@@ -409,6 +688,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     gap: 8,
+  },
+  ctrlBtnDark: {
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
   },
   ctrlBtnText: {
     fontSize: 14,

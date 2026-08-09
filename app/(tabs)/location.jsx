@@ -10,11 +10,17 @@ import {
   Alert,
   Linking,
   Share,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
+import { reverseGeocodeWithCache } from '@/utils/address-cache';
 
 const LocationScreen = () => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   const [location, setLocation] = useState(null);
   const [address, setAddress] = useState(null);
   const [locationType, setLocationType] = useState(null);
@@ -22,11 +28,20 @@ const LocationScreen = () => {
   const [heading, setHeading] = useState(null);
   const [isTracking, setIsTracking] = useState(false);
   const [calculatedDist, setCalculatedDist] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const headingSubscriptionRef = useRef(null);
   const liveTrackingSubscriptionRef = useRef(null);
   const [locationHistory, setLocationHistory] = useState([]);
   const [searchText, setSearchText] = useState('');
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    if (location) {
+      await geoCoding();
+    }
+    setTimeout(() => setRefreshing(false), 500);
+  };
 
   const handleLocation = async () => {
     try {
@@ -95,14 +110,15 @@ const LocationScreen = () => {
       return;
     }
     try {
-      const result = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      });
-      if (result && result.length > 0) {
-        setAddress(result[0]);
+      const lat = location.coords.latitude;
+      const lon = location.coords.longitude;
+
+      // Use offline address cache
+      const { address: cachedAddr } = await reverseGeocodeWithCache(lat, lon);
+      if (cachedAddr) {
+        setAddress(cachedAddr);
       }
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Geocoding Error', 'Failed to reverse geocode location.');
     }
   };
@@ -117,8 +133,8 @@ const LocationScreen = () => {
       headingSubscriptionRef.current = await Location.watchHeadingAsync((data) => {
         setHeading(Math.round(data.trueHeading || data.magHeading));
       });
-    } catch (error) {
-      console.log('Compass error:', error);
+    } catch (_error) {
+      console.log('Compass error:', _error);
       Alert.alert('Compass Error', 'Compass feature is not supported or failed to start.');
     }
   };
@@ -195,17 +211,22 @@ const LocationScreen = () => {
         return;
       }
       setSearchLocation(result[0]);
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Search Error', 'Failed to geocode address.');
     }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+        }
+      >
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>GPS & Location</Text>
-          <Text style={styles.headerSubtitle}>
+          <Text style={[styles.headerTitle, isDark && styles.textDark]}>GPS & Location</Text>
+          <Text style={[styles.headerSubtitle, isDark && styles.textSubDark]}>
             Real-time coordinates, tracking, geocoding & maps
           </Text>
         </View>
@@ -218,9 +239,9 @@ const LocationScreen = () => {
           </TouchableOpacity>
 
           {!isTracking ? (
-            <TouchableOpacity style={styles.actionBtn} onPress={startTracking}>
+            <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={startTracking}>
               <Ionicons name="play" size={18} color="#4A90E2" />
-              <Text style={styles.actionBtnText}>Start Tracking</Text>
+              <Text style={[styles.actionBtnText, isDark && styles.textDark]}>Start Tracking</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.stopBtn} onPress={stopTracking}>
@@ -229,62 +250,72 @@ const LocationScreen = () => {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.actionBtn} onPress={geoCoding}>
+          <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={geoCoding}>
             <Ionicons name="map-outline" size={18} color="#4A90E2" />
-            <Text style={styles.actionBtnText}>Get Address</Text>
+            <Text style={[styles.actionBtnText, isDark && styles.textDark]}>Get Address</Text>
           </TouchableOpacity>
 
           {heading === null ? (
-            <TouchableOpacity style={styles.actionBtn} onPress={startCompass}>
+            <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={startCompass}>
               <Ionicons name="compass-outline" size={18} color="#4A90E2" />
-              <Text style={styles.actionBtnText}>Start Compass</Text>
+              <Text style={[styles.actionBtnText, isDark && styles.textDark]}>Start Compass</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={styles.actionBtn} onPress={stopCompass}>
+            <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={stopCompass}>
               <Ionicons name="compass" size={18} color="#E63946" />
               <Text style={[styles.actionBtnText, { color: '#E63946' }]}>Stop Compass</Text>
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.actionBtn} onPress={openGoogleMaps}>
+          <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={openGoogleMaps}>
             <Ionicons name="open-outline" size={18} color="#4A90E2" />
-            <Text style={styles.actionBtnText}>Open Maps</Text>
+            <Text style={[styles.actionBtnText, isDark && styles.textDark]}>Open Maps</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionBtn} onPress={shareCoordinates}>
+          <TouchableOpacity style={[styles.actionBtn, isDark && styles.actionBtnDark]} onPress={shareCoordinates}>
             <Ionicons name="share-social-outline" size={18} color="#4A90E2" />
-            <Text style={styles.actionBtnText}>Share GPS</Text>
+            <Text style={[styles.actionBtnText, isDark && styles.textDark]}>Share GPS</Text>
           </TouchableOpacity>
         </View>
 
         {/* Current Location Display Card */}
         {location ? (
-          <View style={styles.card}>
+          <View style={[styles.card, isDark && styles.cardDark]}>
             <View style={styles.cardHeader}>
               <Ionicons name="location" size={20} color="#4A90E2" />
-              <Text style={styles.cardTitle}>{locationType || 'GPS Position'}</Text>
+              <Text style={[styles.cardTitle, isDark && styles.textDark]}>
+                {locationType || 'GPS Position'}
+              </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Latitude:</Text>
-              <Text style={styles.infoValue}>{location.coords.latitude}</Text>
+            <View style={[styles.infoRow, isDark && styles.borderDark]}>
+              <Text style={[styles.infoLabel, isDark && styles.textSubDark]}>Latitude:</Text>
+              <Text style={[styles.infoValue, isDark && styles.textDark]}>
+                {location.coords.latitude}
+              </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Longitude:</Text>
-              <Text style={styles.infoValue}>{location.coords.longitude}</Text>
+            <View style={[styles.infoRow, isDark && styles.borderDark]}>
+              <Text style={[styles.infoLabel, isDark && styles.textSubDark]}>Longitude:</Text>
+              <Text style={[styles.infoValue, isDark && styles.textDark]}>
+                {location.coords.longitude}
+              </Text>
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Accuracy:</Text>
-              <Text style={styles.infoValue}>{location.coords.accuracy?.toFixed(1)} meters</Text>
+            <View style={[styles.infoRow, isDark && styles.borderDark]}>
+              <Text style={[styles.infoLabel, isDark && styles.textSubDark]}>Accuracy:</Text>
+              <Text style={[styles.infoValue, isDark && styles.textDark]}>
+                {location.coords.accuracy?.toFixed(1)} meters
+              </Text>
             </View>
             {location.coords.speed !== null ? (
-              <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Speed:</Text>
-                <Text style={styles.infoValue}>{location.coords.speed?.toFixed(1)} m/s</Text>
+              <View style={[styles.infoRow, isDark && styles.borderDark]}>
+                <Text style={[styles.infoLabel, isDark && styles.textSubDark]}>Speed:</Text>
+                <Text style={[styles.infoValue, isDark && styles.textDark]}>
+                  {location.coords.speed?.toFixed(1)} m/s
+                </Text>
               </View>
             ) : null}
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Timestamp:</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.infoRow, isDark && styles.borderDark]}>
+              <Text style={[styles.infoLabel, isDark && styles.textSubDark]}>Timestamp:</Text>
+              <Text style={[styles.infoValue, isDark && styles.textDark]}>
                 {new Date(location.timestamp).toLocaleTimeString()}
               </Text>
             </View>
@@ -293,12 +324,12 @@ const LocationScreen = () => {
 
         {/* Reverse Geocoded Address Card */}
         {address ? (
-          <View style={styles.card}>
+          <View style={[styles.card, isDark && styles.cardDark]}>
             <View style={styles.cardHeader}>
               <Ionicons name="business-outline" size={20} color="#2EC4B6" />
-              <Text style={styles.cardTitle}>Geocoded Address</Text>
+              <Text style={[styles.cardTitle, isDark && styles.textDark]}>Geocoded Address</Text>
             </View>
-            <Text style={styles.addressText}>
+            <Text style={[styles.addressText, isDark && styles.textDark]}>
               {[address.street, address.city, address.region, address.country, address.postalCode]
                 .filter(Boolean)
                 .join(', ')}
@@ -308,24 +339,25 @@ const LocationScreen = () => {
 
         {/* Compass Heading Card */}
         {heading !== null ? (
-          <View style={styles.card}>
+          <View style={[styles.card, isDark && styles.cardDark]}>
             <View style={styles.cardHeader}>
               <Ionicons name="compass" size={20} color="#E63946" />
-              <Text style={styles.cardTitle}>Compass Heading</Text>
+              <Text style={[styles.cardTitle, isDark && styles.textDark]}>Compass Heading</Text>
             </View>
             <Text style={styles.headingValue}>{heading}°</Text>
           </View>
         ) : null}
 
         {/* Search Address Section */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Search Address & Distance</Text>
+        <View style={[styles.card, isDark && styles.cardDark]}>
+          <Text style={[styles.cardTitle, isDark && styles.textDark]}>Search Address & Distance</Text>
           <View style={styles.searchRow}>
             <TextInput
               placeholder="e.g. Kalol, Gandhinagar"
+              placeholderTextColor="#A0AEC0"
               value={searchText}
               onChangeText={setSearchText}
-              style={styles.searchInput}
+              style={[styles.searchInput, isDark && styles.searchInputDark]}
             />
             <TouchableOpacity style={styles.searchBtn} onPress={searchAddress}>
               <Ionicons name="search" size={18} color="#FFFFFF" />
@@ -333,9 +365,9 @@ const LocationScreen = () => {
           </View>
 
           {searchLocation ? (
-            <View style={styles.searchResultBox}>
-              <Text style={styles.searchResultTitle}>Target Coordinates:</Text>
-              <Text style={styles.infoValue}>
+            <View style={[styles.searchResultBox, isDark && styles.resultBoxDark]}>
+              <Text style={[styles.searchResultTitle, isDark && styles.textDark]}>Target Coordinates:</Text>
+              <Text style={[styles.infoValue, isDark && styles.textDark]}>
                 Lat: {searchLocation.latitude}, Lon: {searchLocation.longitude}
               </Text>
               <TouchableOpacity
@@ -358,12 +390,12 @@ const LocationScreen = () => {
 
         {/* Live Location History Log */}
         {locationHistory.length > 0 ? (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Tracking History Log</Text>
+          <View style={[styles.card, isDark && styles.cardDark]}>
+            <Text style={[styles.cardTitle, isDark && styles.textDark]}>Tracking History Log</Text>
             {locationHistory.map((item, idx) => (
               <View key={idx} style={styles.historyRow}>
                 <Ionicons name="ellipse" size={8} color="#4A90E2" />
-                <Text style={styles.historyText}>
+                <Text style={[styles.historyText, isDark && styles.textSubDark]}>
                   {item.coords.latitude.toFixed(4)}, {item.coords.longitude.toFixed(4)} (
                   {new Date(item.timestamp).toLocaleTimeString()})
                 </Text>
@@ -382,6 +414,21 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  containerDark: {
+    backgroundColor: '#0F172A',
+  },
+  textDark: {
+    color: '#FFFFFF',
+  },
+  textSubDark: {
+    color: '#94A3B8',
+  },
+  cardDark: {
+    backgroundColor: '#1E293B',
+  },
+  borderDark: {
+    borderBottomColor: '#334155',
   },
   scrollContent: {
     padding: 16,
@@ -430,6 +477,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
     gap: 6,
+  },
+  actionBtnDark: {
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
   },
   actionBtnText: {
     color: '#4A5568',
@@ -514,6 +565,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#2D3748',
   },
+  searchInputDark: {
+    backgroundColor: '#334155',
+    color: '#FFFFFF',
+  },
   searchBtn: {
     backgroundColor: '#4A90E2',
     borderRadius: 10,
@@ -527,6 +582,9 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     gap: 6,
+  },
+  resultBoxDark: {
+    backgroundColor: '#334155',
   },
   searchResultTitle: {
     fontSize: 13,

@@ -13,17 +13,24 @@ import {
   ActivityIndicator,
   TextInput,
   Modal,
+  Animated,
+  RefreshControl,
+  useColorScheme,
 } from 'react-native';
 import * as Location from 'expo-location';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import { documentDirectory, writeAsStringAsync } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
+import { reverseGeocodeWithCache } from '@/utils/address-cache';
 
 const STORAGE_KEY = 'travelJournal';
 
 const CameraLocation = () => {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
   const cameraRef = useRef(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [locationPermissionStatus, setLocationPermissionStatus] = useState(null);
@@ -32,6 +39,21 @@ const CameraLocation = () => {
   const [capturedData, setCapturedData] = useState(null);
   const [journal, setJournal] = useState([]);
   const [facing, setFacing] = useState('back');
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Part 10 Features
+  const [showGrid, setShowGrid] = useState(true);
+  const [zoom, setZoom] = useState(0);
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [countdown, setCountdown] = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Tap-to-Focus
+  const [focusPos, setFocusPos] = useState(null);
+  const focusAnim = useRef(new Animated.Value(0)).current;
+
+  // Flash Shutter Animation
+  const flashAnim = useRef(new Animated.Value(0)).current;
 
   // Rename modal states
   const [editingItem, setEditingItem] = useState(null);
@@ -56,6 +78,35 @@ const CameraLocation = () => {
     await requestCameraPermission();
     const locPerm = await Location.requestForegroundPermissionsAsync();
     setLocationPermissionStatus(locPerm.status);
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadJournal();
+    setTimeout(() => setRefreshing(false), 500);
+  };
+
+  const triggerShutterFlash = () => {
+    flashAnim.setValue(1);
+    Animated.timing(flashAnim, {
+      toValue: 0,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handleTapToFocus = (event) => {
+    const { locationX, locationY } = event.nativeEvent;
+    setFocusPos({ x: locationX, y: locationY });
+
+    focusAnim.setValue(1.4);
+    Animated.spring(focusAnim, {
+      toValue: 1,
+      friction: 4,
+      useNativeDriver: true,
+    }).start(() => {
+      setTimeout(() => setFocusPos(null), 1200);
+    });
   };
 
   const loadJournal = async () => {
@@ -95,13 +146,24 @@ const CameraLocation = () => {
       return await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
-    } catch (error) {
+    } catch (_error) {
       Alert.alert('Location Error', 'Unable to fetch current location coordinates.');
       return null;
     }
   };
 
-  const capturePhoto = async () => {
+  const executeCapturePhoto = async () => {
+    if (timerSeconds > 0) {
+      for (let i = timerSeconds; i > 0; i--) {
+        setCountdown(i);
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+      setCountdown(null);
+    }
+    performCapturePhoto();
+  };
+
+  const performCapturePhoto = async () => {
     if (!cameraRef.current) {
       Alert.alert('Camera Error', 'Camera is not ready yet.');
       return;
@@ -116,20 +178,16 @@ const CameraLocation = () => {
         return;
       }
 
-      const photo = await cameraRef.current.takePictureAsync();
+      triggerShutterFlash();
 
-      let address = null;
-      try {
-        const result = await Location.reverseGeocodeAsync({
-          latitude: currLocation.coords.latitude,
-          longitude: currLocation.coords.longitude,
-        });
-        if (result && result.length > 0) {
-          address = result[0];
-        }
-      } catch (geoErr) {
-        console.log('Reverse geocode error:', geoErr);
-      }
+      const photo = await cameraRef.current.takePictureAsync({
+        shutterSound: soundEnabled,
+      });
+
+      // Use offline address cache module
+      const lat = currLocation.coords.latitude;
+      const lon = currLocation.coords.longitude;
+      const { address } = await reverseGeocodeWithCache(lat, lon);
 
       const timestamp = Date.now();
       const defaultTitle = address?.city
@@ -140,8 +198,8 @@ const CameraLocation = () => {
         id: timestamp.toString(),
         title: defaultTitle,
         uri: photo.uri,
-        latitude: currLocation.coords.latitude,
-        longitude: currLocation.coords.longitude,
+        latitude: lat,
+        longitude: lon,
         accuracy: currLocation.coords.accuracy,
         timestamp: timestamp,
         address: address,
@@ -252,9 +310,10 @@ const CameraLocation = () => {
       }
 
       const jsonData = JSON.stringify(journal, null, 2);
-      const fileUri = `${FileSystem.documentDirectory}travelJournal.json`;
+      const dir = documentDirectory || '';
+      const fileUri = `${dir}travelJournal.json`;
 
-      await FileSystem.writeAsStringAsync(fileUri, jsonData);
+      await writeAsStringAsync(fileUri, jsonData);
 
       const canShare = await Sharing.isAvailableAsync();
       if (!canShare) {
@@ -273,13 +332,13 @@ const CameraLocation = () => {
     }
   };
 
-  // Permission Check Screen
+  // Permission Screen
   if (!cameraPermission?.granted || locationPermissionStatus !== 'granted') {
     return (
-      <SafeAreaView style={styles.permissionContainer}>
+      <SafeAreaView style={[styles.permissionContainer, isDark && styles.containerDark]}>
         <Ionicons name="shield-checkmark-outline" size={64} color="#4A90E2" />
-        <Text style={styles.permissionTitle}>Permissions Needed</Text>
-        <Text style={styles.permissionText}>
+        <Text style={[styles.permissionTitle, isDark && styles.textDark]}>Permissions Needed</Text>
+        <Text style={[styles.permissionText, isDark && styles.textSubDark]}>
           Travel Guardian requires access to your Camera & Location to capture photos with automatic GPS geotagging.
         </Text>
         <TouchableOpacity style={styles.primaryBtn} onPress={requestAllPermissions}>
@@ -291,30 +350,153 @@ const CameraLocation = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+    <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#4A90E2" />
+        }
+      >
         {/* Title Bar */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Camera & Location Journal</Text>
-          <Text style={styles.headerSubtitle}>Snap photos with live GPS address overlays</Text>
+          <Text style={[styles.headerTitle, isDark && styles.textDark]}>Camera & Location Journal</Text>
+          <Text style={[styles.headerSubtitle, isDark && styles.textSubDark]}>
+            Geotagged photos with offline address cache
+          </Text>
         </View>
 
         {/* Live Camera View Card */}
-        <View style={styles.cameraCard}>
-          <CameraView ref={cameraRef} style={styles.cameraPreview} facing={facing} mode="picture" />
-          <TouchableOpacity
-            style={styles.flipBtn}
-            onPress={() => setFacing((prev) => (prev === 'back' ? 'front' : 'back'))}
-          >
-            <Ionicons name="camera-reverse" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={handleTapToFocus}
+          style={styles.cameraCard}
+        >
+          <CameraView
+            ref={cameraRef}
+            style={styles.cameraPreview}
+            facing={facing}
+            mode="picture"
+            zoom={zoom}
+          />
+
+          {/* Rule of Thirds Grid */}
+          {showGrid && (
+            <View style={styles.gridOverlay} pointerEvents="none">
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+              <View style={styles.gridRow}>
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+                <View style={styles.gridCell} />
+              </View>
+            </View>
+          )}
+
+          {/* Tap-to-Focus Ring */}
+          {focusPos && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.focusRing,
+                {
+                  left: focusPos.x - 26,
+                  top: focusPos.y - 26,
+                  transform: [{ scale: focusAnim }],
+                },
+              ]}
+            />
+          )}
+
+          {/* Shutter White Flash */}
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.flashOverlay, { opacity: flashAnim }]}
+          />
+
+          {/* Countdown Overlay */}
+          {countdown !== null && (
+            <View style={styles.countdownOverlay}>
+              <Text style={styles.countdownText}>{countdown}</Text>
+            </View>
+          )}
+
+          {/* Camera Top Badges */}
+          <View style={styles.topControlOverlay}>
+            <TouchableOpacity
+              style={[styles.flipBtn, showGrid && styles.btnActive]}
+              onPress={() => setShowGrid((prev) => !prev)}
+            >
+              <Ionicons name="grid-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.flipBtn, !soundEnabled && styles.btnActive]}
+              onPress={() => setSoundEnabled((prev) => !prev)}
+            >
+              <Ionicons
+                name={soundEnabled ? 'volume-high-outline' : 'volume-mute-outline'}
+                size={20}
+                color="#FFFFFF"
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.flipBtn}
+              onPress={() => setFacing((prev) => (prev === 'back' ? 'front' : 'back'))}
+            >
+              <Ionicons name="camera-reverse" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+
+        {/* Quick Toolbar (Zoom & Timer) */}
+        <View style={[styles.toolbarCard, isDark && styles.cardDark]}>
+          <View style={styles.toolSection}>
+            <Ionicons name="search-outline" size={16} color={isDark ? '#CBD5E0' : '#4A5568'} />
+            <Text style={[styles.toolLabel, isDark && styles.textDark]}>Zoom:</Text>
+            {[0, 0.25, 0.5, 1].map((z) => (
+              <TouchableOpacity
+                key={z}
+                style={[styles.chip, zoom === z && styles.chipActive]}
+                onPress={() => setZoom(z)}
+              >
+                <Text style={[styles.chipText, zoom === z && styles.chipTextActive]}>
+                  {z === 0 ? '1x' : `${(z * 4 + 1).toFixed(0)}x`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.toolSection}>
+            <Ionicons name="timer-outline" size={16} color={isDark ? '#CBD5E0' : '#4A5568'} />
+            <Text style={[styles.toolLabel, isDark && styles.textDark]}>Timer:</Text>
+            {[0, 3, 5, 10].map((t) => (
+              <TouchableOpacity
+                key={t}
+                style={[styles.chip, timerSeconds === t && styles.chipActive]}
+                onPress={() => setTimerSeconds(t)}
+              >
+                <Text style={[styles.chipText, timerSeconds === t && styles.chipTextActive]}>
+                  {t === 0 ? 'Off' : `${t}s`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
 
         {/* Action Controls */}
         <View style={styles.controlRow}>
           <TouchableOpacity
             style={[styles.captureBtn, capturing && styles.btnDisabled]}
-            onPress={capturePhoto}
+            onPress={executeCapturePhoto}
             disabled={capturing}
           >
             {capturing ? (
@@ -322,7 +504,9 @@ const CameraLocation = () => {
             ) : (
               <>
                 <Ionicons name="aperture" size={22} color="#FFFFFF" />
-                <Text style={styles.captureBtnText}>Capture Photo + Location</Text>
+                <Text style={styles.captureBtnText}>
+                  {timerSeconds > 0 ? `Capture (${timerSeconds}s)` : 'Capture Photo + GPS'}
+                </Text>
               </>
             )}
           </TouchableOpacity>
@@ -338,8 +522,8 @@ const CameraLocation = () => {
         {/* Latest Capture Preview Section */}
         {capturedData ? (
           <View style={styles.latestSection}>
-            <Text style={styles.sectionTitle}>Latest Capture</Text>
-            <View style={styles.previewCard}>
+            <Text style={[styles.sectionTitle, isDark && styles.textDark]}>Latest Capture</Text>
+            <View style={[styles.previewCard, isDark && styles.cardDark]}>
               <Image source={{ uri: capturedData.uri }} style={styles.previewImage} />
 
               <View style={styles.overlayInfo}>
@@ -362,7 +546,7 @@ const CameraLocation = () => {
                   onPress={() => openGoogleMaps(capturedData)}
                 >
                   <Ionicons name="map" size={18} color="#4A90E2" />
-                  <Text style={styles.previewToolText}>Maps</Text>
+                  <Text style={[styles.previewToolText, isDark && styles.textDark]}>Maps</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -370,7 +554,7 @@ const CameraLocation = () => {
                   onPress={() => shareLocation(capturedData)}
                 >
                   <Ionicons name="share-social" size={18} color="#4A90E2" />
-                  <Text style={styles.previewToolText}>Share</Text>
+                  <Text style={[styles.previewToolText, isDark && styles.textDark]}>Share</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -382,7 +566,7 @@ const CameraLocation = () => {
                     size={18}
                     color={capturedData.isFavorite ? '#E63946' : '#4A90E2'}
                   />
-                  <Text style={styles.previewToolText}>Favorite</Text>
+                  <Text style={[styles.previewToolText, isDark && styles.textDark]}>Favorite</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -391,20 +575,22 @@ const CameraLocation = () => {
 
         {/* Journal Entries List */}
         <View style={styles.journalSection}>
-          <Text style={styles.sectionTitle}>Travel Entries ({journal.length})</Text>
+          <Text style={[styles.sectionTitle, isDark && styles.textDark]}>
+            Travel Entries ({journal.length})
+          </Text>
 
           {journal.length === 0 ? (
-            <View style={styles.emptyCard}>
+            <View style={[styles.emptyCard, isDark && styles.cardDark]}>
               <Ionicons name="journal-outline" size={48} color="#A0AEC0" />
               <Text style={styles.emptyText}>No entries captured yet.</Text>
             </View>
           ) : (
             journal.map((item) => (
-              <View key={item.id} style={styles.entryCard}>
+              <View key={item.id} style={[styles.entryCard, isDark && styles.cardDark]}>
                 <Image source={{ uri: item.uri }} style={styles.entryThumbnail} />
                 <View style={styles.entryContent}>
                   <View style={styles.entryTitleRow}>
-                    <Text style={styles.entryTitle} numberOfLines={1}>
+                    <Text style={[styles.entryTitle, isDark && styles.textDark]} numberOfLines={1}>
                       {item.title}
                     </Text>
                     <TouchableOpacity onPress={() => toggleFavorite(item.id)}>
@@ -449,13 +635,14 @@ const CameraLocation = () => {
       {/* Rename Modal */}
       <Modal visible={renameModalVisible} transparent animationType="fade">
         <View style={styles.dialogBackdrop}>
-          <View style={styles.dialogCard}>
-            <Text style={styles.dialogTitle}>Rename Journal Entry</Text>
+          <View style={[styles.dialogCard, isDark && styles.cardDark]}>
+            <Text style={[styles.dialogTitle, isDark && styles.textDark]}>Rename Journal Entry</Text>
             <TextInput
-              style={styles.dialogInput}
+              style={[styles.dialogInput, isDark && styles.dialogInputDark]}
               value={editTitle}
               onChangeText={setEditTitle}
               placeholder="Enter new entry title"
+              placeholderTextColor="#A0AEC0"
               autoFocus
             />
             <View style={styles.dialogButtons}>
@@ -479,6 +666,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F8F9FA',
+  },
+  containerDark: {
+    backgroundColor: '#0F172A',
+  },
+  textDark: {
+    color: '#FFFFFF',
+  },
+  textSubDark: {
+    color: '#94A3B8',
+  },
+  cardDark: {
+    backgroundColor: '#1E293B',
   },
   scrollContent: {
     padding: 16,
@@ -533,23 +732,103 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   cameraCard: {
-    height: 300,
+    height: 320,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: '#1E293B',
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   cameraPreview: {
     flex: 1,
   },
-  flipBtn: {
+  gridOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'column',
+  },
+  gridRow: {
+    flex: 1,
+    flexDirection: 'row',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.3)',
+  },
+  gridCell: {
+    flex: 1,
+    borderRightWidth: 0.5,
+    borderRightColor: 'rgba(255,255,255,0.3)',
+  },
+  focusRing: {
+    position: 'absolute',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    backgroundColor: 'rgba(255,215,0,0.15)',
+  },
+  flashOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#FFFFFF',
+  },
+  countdownOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  countdownText: {
+    fontSize: 72,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  topControlOverlay: {
     position: 'absolute',
     top: 12,
     right: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  flipBtn: {
     backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 10,
+    padding: 8,
     borderRadius: 20,
+  },
+  btnActive: {
+    backgroundColor: '#E63946',
+  },
+  toolbarCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  toolSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  toolLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2D3748',
+  },
+  chip: {
+    backgroundColor: '#EDF2F7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  chipActive: {
+    backgroundColor: '#4A90E2',
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4A5568',
+  },
+  chipTextActive: {
+    color: '#FFFFFF',
   },
   controlRow: {
     marginBottom: 12,
@@ -746,7 +1025,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 12,
     fontSize: 15,
+    color: '#2D3748',
     marginBottom: 16,
+  },
+  dialogInputDark: {
+    backgroundColor: '#334155',
+    color: '#FFFFFF',
   },
   dialogButtons: {
     flexDirection: 'row',
